@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HFT Orderbook — WASM Engine</title>
+<style>
+  :root {
+    --bg0:#0a0b0d;--bg1:#111318;--bg2:#181c24;--bg3:#1f2430;
+    --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.12);
+    --text0:#e8eaf0;--text1:#9ca3b0;--text2:#556070;
+    --green:#00d97e;--green-dim:rgba(0,217,126,0.12);
+    --red:#ff4d4d;--red-dim:rgba(255,77,77,0.12);
+    --blue:#4d9fff;--amber:#ffb347;
+    --mono:'JetBrains Mono','Fira Code','Courier New',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;background:var(--bg0);color:var(--text0);font-family:var(--mono);overflow:hidden;}
+  #root{display:grid;grid-template-rows:44px 64px 1fr 130px;height:100vh;}
+
+  #topbar{display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid var(--border);background:var(--bg1);}
+  .ticker-wrap{display:flex;align-items:center;gap:10px;}
+  .ticker{font-size:13px;font-weight:600;letter-spacing:0.12em;}
+  .tag-exchange{font-size:9px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);padding:2px 6px;border-radius:3px;letter-spacing:0.08em;}
+  .status-dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);transition:background 0.3s;}
+  .status-dot.paused{background:var(--red);box-shadow:0 0 6px var(--red);}
+  #statusTxt{font-size:10px;color:var(--text2);letter-spacing:0.08em;}
+  .ctrl-row{display:flex;align-items:center;gap:8px;}
+  .btn{font-family:var(--mono);font-size:10px;padding:4px 10px;border:1px solid var(--border2);border-radius:3px;background:var(--bg2);color:var(--text1);cursor:pointer;letter-spacing:0.05em;transition:all 0.1s;}
+  .btn:hover{background:var(--bg3);color:var(--text0);border-color:rgba(255,255,255,0.2);}
+  .btn.active{background:var(--bg3);color:var(--text0);border-color:rgba(255,255,255,0.25);}
+  .btn.danger{color:var(--red);border-color:rgba(255,77,77,0.4);}
+  .btn.danger:hover{background:rgba(255,77,77,0.08);}
+  .spd-wrap{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text2);}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:80px;height:3px;background:var(--bg3);border-radius:2px;outline:none;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:11px;height:11px;border-radius:50%;background:var(--blue);cursor:pointer;}
+  #spdLabel{min-width:28px;color:var(--blue);}
+
+  #metbar{display:grid;grid-template-columns:repeat(6,1fr);border-bottom:1px solid var(--border);background:var(--bg1);}
+  .met{padding:8px 14px;border-right:1px solid var(--border);display:flex;flex-direction:column;gap:2px;}
+  .met:last-child{border-right:none;}
+  .met-label{font-size:9px;color:var(--text2);text-transform:uppercase;letter-spacing:0.08em;}
+  .met-val{font-size:18px;font-weight:600;color:var(--text0);font-variant-numeric:tabular-nums;transition:color 0.15s;}
+  .met-val.up{color:var(--green);}
+  .met-val.dn{color:var(--red);}
+  .met-val.blue{color:var(--blue);}
+
+  #main{display:grid;grid-template-columns:380px 1fr 220px;overflow:hidden;border-bottom:1px solid var(--border);}
+  .pane{border-right:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;}
+  .pane:last-child{border-right:none;}
+  .pane-header{font-size:9px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--text2);padding:6px 12px;border-bottom:1px solid var(--border);background:var(--bg1);flex-shrink:0;}
+
+  #bookWrap{overflow:hidden;flex:1;display:flex;flex-direction:column;}
+  .book-half{flex:1;overflow:hidden;}
+  .book-spread{font-size:9px;color:var(--text2);text-align:center;padding:3px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--bg1);letter-spacing:0.05em;flex-shrink:0;}
+  table.book{width:100%;border-collapse:collapse;table-layout:fixed;}
+  table.book th{font-size:8px;color:var(--text2);text-transform:uppercase;letter-spacing:0.06em;padding:3px 10px;text-align:right;font-weight:400;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg1);}
+  table.book th:first-child{text-align:left;}
+  table.book td{font-size:11px;padding:1px 10px;text-align:right;font-variant-numeric:tabular-nums;position:relative;overflow:hidden;line-height:1.7;}
+  table.book td:first-child{text-align:left;}
+  table.book td .bar{position:absolute;top:0;right:0;height:100%;pointer-events:none;}
+  table.book td span{position:relative;z-index:1;}
+  .ask-px{color:var(--red);}
+  .bid-px{color:var(--green);}
+  .ask-row:hover{background:rgba(255,77,77,0.05);}
+  .bid-row:hover{background:rgba(0,217,126,0.05);}
+
+
+
+  #tapeBody{overflow-y:auto;flex:1;}
+  .tape-row{display:grid;grid-template-columns:58px 38px 1fr;padding:1px 10px;font-size:11px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;}
+  .tape-row:last-child{border-bottom:none;}
+  .tape-px{font-weight:600;}
+  .tape-qty{text-align:right;color:var(--text1);}
+  .tape-time{text-align:right;font-size:9px;color:var(--text2);}
+  .tape-row.buy .tape-px{color:var(--green);}
+  .tape-row.sell .tape-px{color:var(--red);}
+
+  #agentBody{overflow-y:auto;flex:1;}
+  table.agents{width:100%;border-collapse:collapse;table-layout:fixed;}
+  table.agents th{font-size:8px;color:var(--text2);text-transform:uppercase;letter-spacing:0.06em;padding:3px 8px;text-align:right;font-weight:400;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg1);}
+  table.agents th:first-child{text-align:left;}
+  table.agents td{font-size:10px;padding:3px 8px;text-align:right;border-bottom:1px solid var(--border);color:var(--text1);}
+  table.agents td:first-child{text-align:left;color:var(--text2);font-size:9px;}
+  table.agents tr:last-child td{border-bottom:none;}
+  .agent-dot{display:inline-block;width:5px;height:5px;border-radius:50%;margin-right:4px;}
+
+  #logbar{display:flex;flex-direction:column;overflow:hidden;}
+  .logbar-header{font-size:9px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--text2);padding:5px 14px;border-bottom:1px solid var(--border);background:var(--bg1);flex-shrink:0;display:flex;align-items:center;gap:10px;}
+  #logScroll{overflow-x:auto;overflow-y:hidden;flex:1;display:flex;align-items:center;padding:0 8px;}
+  .log-entry{display:inline-flex;align-items:center;gap:5px;padding:0 10px;border-right:1px solid var(--border);height:100%;white-space:nowrap;font-size:10px;color:var(--text1);flex-shrink:0;}
+  .log-tag{font-size:8px;padding:1px 5px;border-radius:2px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;}
+  .log-tag.trade{background:rgba(0,217,126,0.15);color:var(--green);}
+  .log-tag.add{background:rgba(77,159,255,0.15);color:var(--blue);}
+  .log-tag.cancel{background:rgba(255,179,71,0.15);color:var(--amber);}
+  .log-tag.fnk{background:rgba(255,77,77,0.15);color:var(--red);}
+
+  #overlay{position:fixed;inset:0;background:var(--bg0);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:1000;gap:16px;}
+  #overlay.hidden{display:none;}
+  .ov-title{font-size:14px;color:var(--text0);letter-spacing:0.1em;}
+  .ov-sub{font-size:11px;color:var(--text2);text-align:center;max-width:400px;line-height:1.6;}
+  .ov-status{font-size:11px;color:var(--blue);}
+  .ov-bar{width:280px;height:2px;background:var(--bg3);border-radius:1px;overflow:hidden;}
+  .ov-fill{height:100%;background:var(--blue);border-radius:1px;transition:width 0.3s;}
+  .ov-note{margin-top:20px;font-size:10px;color:var(--text2);background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:10px 16px;max-width:460px;line-height:1.8;text-align:left;}
+  .ov-note code{color:var(--blue);font-family:var(--mono);}
+  .ov-note b{color:var(--text1);}
+  #btnFallback{display:none;margin-top:8px;font-family:var(--mono);font-size:11px;padding:6px 14px;border:1px solid rgba(77,159,255,0.4);border-radius:3px;background:rgba(77,159,255,0.08);color:var(--blue);cursor:pointer;}
+  #btnFallback:hover{background:rgba(77,159,255,0.15);}
+  ::-webkit-scrollbar{width:4px;height:4px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<div id="overlay">
+  <div class="ov-title">HFT ORDERBOOK ENGINE</div>
+  <div class="ov-bar"><div class="ov-fill" id="ovFill" style="width:10%"></div></div>
+  <div class="ov-status" id="ovStatus">Loading WASM module…</div>
+  <div class="ov-sub">Connecting to compiled C++ orderbook engine</div>
+  <div class="ov-note">
+    <b>Setup:</b> place <code>orderbook.js</code> + <code>orderbook.wasm</code> in same folder, then:<br><br>
+    <code>python -m http.server 8080</code><br>
+    <code>open http://localhost:8080/orderbook_hft.html</code><br><br>
+    <b>Compile:</b><br>
+    <code>em++ -O3 -std=c++20 orderbook.cpp -s WASM=1 -s MODULARIZE=1 -s EXPORT_NAME="OrderbookModule" -s EXPORTED_FUNCTIONS=[_ob_create,_ob_destroy,_ob_add_order,_ob_cancel,_ob_size,_ob_get_levels,_malloc,_free] -s EXPORTED_RUNTIME_METHODS=[ccall,cwrap,UTF8ToString] -s ALLOW_MEMORY_GROWTH=1 -o orderbook.js</code>
+  </div>
+  <button id="btnFallback" onclick="startFallback()">▶ Run with JS fallback engine</button>
+</div>
+
+<div id="root">
+  <div id="topbar">
+    <div class="ticker-wrap">
+      <span class="ticker">AAPL</span>
+      <span class="tag-exchange" id="engTag">WASM ENGINE</span>
+      <span class="status-dot" id="dot"></span>
+      <span id="statusTxt">CONNECTING</span>
+    </div>
+    <div class="ctrl-row">
+      <div class="spd-wrap">
+        <span>Freq</span>
+        <input type="range" min="1" max="20" value="8" id="spdSlider" step="1">
+        <span id="spdLabel">8x</span>
+      </div>
+      <button class="btn active" id="btnGTC" onclick="setMode('GTC')">GTC</button>
+      <button class="btn" id="btnFnK" onclick="setMode('FnK')">FnK</button>
+      <button class="btn danger" id="btnPause" onclick="togglePause()">Pause</button>
+      <button class="btn" onclick="resetAll()">Reset</button>
+      <span id="engineBadge" style="font-size:9px;color:var(--text2);letter-spacing:0.06em;">engine: —</span>
+      <button class="btn" id="btnJS" onclick="startFallback()" style="border-color:rgba(255,179,71,0.4);color:var(--amber);">JS Mode</button>
+    </div>
+  </div>
+
+  <div id="metbar">
+    <div class="met"><div class="met-label">Last Price</div><div class="met-val" id="mPx">—</div></div>
+    <div class="met"><div class="met-label">Spread (¢)</div><div class="met-val" id="mSpr">—</div></div>
+    <div class="met"><div class="met-label">Trades / s</div><div class="met-val blue" id="mTps">0</div></div>
+    <div class="met"><div class="met-label">Orders</div><div class="met-val" id="mOrd">0</div></div>
+    <div class="met"><div class="met-label">Volume</div><div class="met-val" id="mVol">0</div></div>
+    <div class="met"><div class="met-label">Tick #</div><div class="met-val blue" id="mTick">0</div></div>
+  </div>
+
+  <div id="main">
+    <div class="pane">
+      <div class="pane-header">Order Book</div>
+      <div id="bookWrap">
+        <div class="book-half" id="askHalf" style="overflow-y:auto;display:flex;flex-direction:column-reverse;">
+          <table class="book">
+            <thead><tr><th>Price</th><th style="text-align:right">Qty</th><th style="text-align:right">N</th></tr></thead>
+            <tbody id="askBody"></tbody>
+          </table>
+        </div>
+        <div class="book-spread" id="spreadRow">spread —</div>
+        <div class="book-half" id="bidHalf" style="overflow-y:auto;">
+          <table class="book"><tbody id="bidBody"></tbody></table>
+        </div>
+      </div>
+    </div>
+    <div class="pane">
+      <div class="pane-header">Trade Tape</div>
+      <div id="tapeBody"></div>
+    </div>
+    <div class="pane">
+      <div class="pane-header">Agents</div>
+      <div id="agentBody">
+        <table class="agents">
+          <thead><tr><th>Agent</th><th>Trades</th><th>Inv</th></tr></thead>
+          <tbody id="agTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="logbar">
+    <div class="logbar-header">
+      <span>Event Stream</span>
+      <span id="logCount" style="color:var(--text2);font-weight:400">0 events</span>
+    </div>
+    <div id="logScroll"></div>
+  </div>
+</div>
+
+<script>
+// ── JS FALLBACK ENGINE ────────────────────────────────────
+class JSOrder {
+  constructor(type,id,side,px,qty){this.type=type;this.id=id;this.side=side;this.px=px;this.qty=qty;this.rem=qty;}
+  fill(q){this.rem-=q;}
+  filled(){return this.rem<=0;}
+}
+class JSOrderbook {
+  constructor(){this.bids=new Map();this.asks=new Map();this.map=new Map();}
+  _bp(){return[...this.bids.keys()].sort((a,b)=>b-a);}
+  _ap(){return[...this.asks.keys()].sort((a,b)=>a-b);}
+  bestBid(){const k=this._bp();return k.length?k[0]:null;}
+  bestAsk(){const k=this._ap();return k.length?k[0]:null;}
+  mid(){const b=this.bestBid(),a=this.bestAsk();return b&&a?(b+a)/2:b||a||10000;}
+  canMatch(side,px){
+    if(side==='buy'){const a=this.bestAsk();return a!==null&&px>=a;}
+    const b=this.bestBid();return b!==null&&px<=b;
+  }
+  _match(){
+    const trades=[];
+    while(true){
+      const bp=this._bp(),ap=this._ap();
+      if(!bp.length||!ap.length)break;
+      const BB=bp[0],BA=ap[0];
+      if(BB<BA)break;
+      const bids=this.bids.get(BB),asks=this.asks.get(BA);
+      while(bids&&bids.length&&asks&&asks.length){
+        const bid=bids[0],ask=asks[0];
+        const q=Math.min(bid.rem,ask.rem);
+        bid.fill(q);ask.fill(q);
+        trades.push({bidId:bid.id,askId:ask.id,price:BA,qty:q,side:'buy'});
+        if(bid.filled()){bids.shift();this.map.delete(bid.id);}
+        if(ask.filled()){asks.shift();this.map.delete(ask.id);}
+        if(!bids.length)this.bids.delete(BB);
+        if(!asks.length)this.asks.delete(BA);
+      }
+    }
+    const bp2=this._bp(),ap2=this._ap();
+    if(bp2.length){const q=this.bids.get(bp2[0]);if(q&&q[0]&&q[0].type==='FnK')this.cancel(q[0].id);}
+    if(ap2.length){const q=this.asks.get(ap2[0]);if(q&&q[0]&&q[0].type==='FnK')this.cancel(q[0].id);}
+    return trades;
+  }
+  add(o){
+    if(this.map.has(o.id))return[];
+    if(o.type==='FnK'&&!this.canMatch(o.side,o.px))return[];
+    const book=o.side==='buy'?this.bids:this.asks;
+    if(!book.has(o.px))book.set(o.px,[]);
+    book.get(o.px).push(o);
+    this.map.set(o.id,o);
+    return this._match();
+  }
+  cancel(id){
+    if(!this.map.has(id))return;
+    const o=this.map.get(id);this.map.delete(id);
+    const book=o.side==='sell'?this.asks:this.bids;
+    const lvl=book.get(o.px);
+    if(!lvl)return;
+    const i=lvl.indexOf(o);if(i>-1)lvl.splice(i,1);
+    if(!lvl.length)book.delete(o.px);
+  }
+  infos(){
+    const bids=this._bp().map(p=>{const os=this.bids.get(p);return{px:p,qty:os.reduce((s,o)=>s+o.rem,0),n:os.length};});
+    const asks=this._ap().map(p=>{const os=this.asks.get(p);return{px:p,qty:os.reduce((s,o)=>s+o.rem,0),n:os.length};});
+    return{bids,asks};
+  }
+  size(){return this.map.size;}
+}
+
+// ── WASM BRIDGE ───────────────────────────────────────────
+class WASMOrderbook {
+  constructor(M){
+    this.M=M;
+    this.ob_create    =M.cwrap('ob_create',    'number',[]);
+    this.ob_destroy   =M.cwrap('ob_destroy',   null,   ['number']);
+    this.ob_add_order =M.cwrap('ob_add_order', 'number',['number','number','number','number','number','number']);
+    this.ob_cancel    =M.cwrap('ob_cancel',    null,   ['number','number']);
+    this.ob_size      =M.cwrap('ob_size',      'number',['number']);
+    this.ob_get_levels=M.cwrap('ob_get_levels',null,   ['number','number','number']);
+    this.ptr=this.ob_create();
+    this._buf=M._malloc(32768);
+    this._cached={bids:[],asks:[]};
+    this._dirty=true;
+  }
+  add(o){
+    this._dirty=true;
+    const n=this.ob_add_order(this.ptr,o.type==='GTC'?0:1,o.id>>>0,o.side==='buy'?0:1,o.px|0,o.rem>>>0);
+    const trades=[];
+    for(let i=0;i<n;i++)trades.push({price:o.px,qty:o.rem,side:o.side,bidId:o.id,askId:o.id});
+    return trades;
+  }
+  cancel(id){this._dirty=true;this.ob_cancel(this.ptr,id>>>0);}
+  size(){return this.ob_size(this.ptr);}
+  infos(){
+    if(!this._dirty)return this._cached;
+    this.ob_get_levels(this.ptr,this._buf,32768);
+    try{this._cached=JSON.parse(this.M.UTF8ToString(this._buf));}catch(e){this._cached={bids:[],asks:[]};}
+    this._dirty=false;
+    return this._cached;
+  }
+  // all read methods check _dirty flag — only one infos() call per frame
+  bestBid(){if(this._dirty)this.infos();return this._cached.bids[0]?.px??null;}
+  bestAsk(){if(this._dirty)this.infos();return this._cached.asks[0]?.px??null;}
+  mid(){if(this._dirty)this.infos();const b=this._cached.bids[0]?.px,a=this._cached.asks[0]?.px;return b&&a?(b+a)/2:b||a||10000;}
+  canMatch(side,px){
+    if(this._dirty)this.infos();
+    if(side==='buy'){const a=this._cached.asks[0]?.px;return a!==null&&a!==undefined&&px>=a;}
+    const b=this._cached.bids[0]?.px;return b!==null&&b!==undefined&&px<=b;
+  }
+  destroy(){this.M._free(this._buf);this.ob_destroy(this.ptr);}
+}
+
+// ── STATE ─────────────────────────────────────────────────
+let ob=null,engineType='none';
+let nid=1,paused=false,simMode='GTC',mid0=10000;
+let totalVol=0,tpw=0,tps=0,lastTpsT=Date.now(),tickNum=0;
+let tpsRing=[],tpsRingIdx=0; // ring buffer of last 10 one-second buckets
+let pxHist=[],tape=[],logs=[],logTotal=0;
+let spd=8;
+
+// ─────────────────────────────────────────────────────────
+
+const TICK=1,INIT_MID=10000,BOOK_DEPTH=10,BOOK_STEP=1;
+const DRIFT_PROB=0.008,DRIFT_SIGMA=1,NOISE_SIGMA=2,MOM_AGGR=1;
+
+const AGENTS=[
+  {name:'MM Alpha',type:'mm',   trades:0,buyVol:0,sellVol:0,color:'#4d9fff'},
+  {name:'Momentum',type:'mom',  trades:0,buyVol:0,sellVol:0,color:'#00d97e'},
+  {name:'Arb Desk', type:'arb', trades:0,buyVol:0,sellVol:0,color:'#ff4d4d'},
+  {name:'Noise',    type:'noise',trades:0,buyVol:0,sellVol:0,color:'#9ca3b0'},
+];
+
+const rnd  =(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const randn=()=>{let u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);};
+const f2  =c=>(c/100).toFixed(2);
+const fmt =c=>'$'+f2(c);
+const nowt=()=>new Date().toLocaleTimeString('en',{hour12:false});
+
+function addLog(tag,txt){
+  logs.unshift({tag,txt,t:nowt()});
+  if(logs.length>40)logs.pop(); // capped at 40
+  logTotal++;
+}
+
+function onTrades(trades,ag,side){
+  for(const t of trades){
+    totalVol+=t.qty;tpw++;
+    if(ag){ag.trades++;if(side==='buy')ag.buyVol+=t.qty;else ag.sellVol+=t.qty;}
+    const s=side||t.side||'buy';
+    tape.unshift({px:t.price,qty:t.qty,side:s,t:nowt()});
+    if(tape.length>40)tape.pop();
+    pxHist.push(t.price);
+    if(pxHist.length>400)pxHist.shift();
+    addLog('trade',`${fmt(t.price)} ×${t.qty}`);
+  }
+}
+
+// ── AGENTS ────────────────────────────────────────────────
+function agentTick(ag){
+  const mid=ob.mid();
+  if(ag.type==='mm'){
+    const half=rnd(0,1)?1:0;
+    const bpx=Math.round(mid)-TICK-half;
+    const apx=Math.round(mid)+TICK+half;
+    const qty=rnd(10,50);
+    const tp=simMode==='FnK'&&Math.random()<0.1?'FnK':'GTC';
+    onTrades(ob.add(new JSOrder(tp,nid++,'buy', bpx,qty)),ag,'buy');
+    onTrades(ob.add(new JSOrder(tp,nid++,'sell',apx,qty)),ag,'sell');
+    // MM cancels stale quotes aggressively — real MMs refresh every few ms
+    // higher cancel rate keeps book from clogging with stale passive depth
+    if(Math.random()<0.50&&ob.size()>10){
+      const ids=ob.map?[...ob.map.keys()]:[];
+      if(ids.length)ob.cancel(ids[rnd(0,ids.length-1)]);
+      if(ids.length>1)ob.cancel(ids[rnd(0,ids.length-1)]); // cancel 2 per tick
+    }
+  } else if(ag.type==='mom'){
+    const last=pxHist[pxHist.length-1],prev=pxHist[pxHist.length-10]||last;
+    if(!last||!prev)return;
+    const diff=last-prev;
+    // lower threshold — trade on any move, not just >=TICK
+    const side=diff>=0?'buy':'sell';
+    const agpx=side==='buy'?(ob.bestAsk()||Math.round(mid)+TICK):(ob.bestBid()||Math.round(mid)-TICK);
+    onTrades(ob.add(new JSOrder('GTC',nid++,side,Math.round(agpx),rnd(5,25))),ag,side);
+  } else if(ag.type==='arb'){
+    const b=ob.bestBid(),a=ob.bestAsk();
+    if(b!==null&&a!==null&&b>=a){
+      onTrades(ob.add(new JSOrder('GTC',nid++,'buy',a,rnd(5,20))),ag,'buy');
+    } else {
+      // arb hits best quote 50% of time instead of always posting passive
+      const side=Math.random()<0.5?'buy':'sell';
+      const aggressive=Math.random()<0.5;
+      const px=aggressive
+        ?(side==='buy'?(ob.bestAsk()||Math.round(mid)+1):(ob.bestBid()||Math.round(mid)-1))
+        :(side==='buy'?Math.round(mid)-1:Math.round(mid)+1);
+      onTrades(ob.add(new JSOrder('GTC',nid++,side,px,rnd(5,20))),ag,side);
+    }
+  } else {
+    // noise — more bursts, always aggressive
+    const bursts=rnd(4,10);
+    for(let i=0;i<bursts;i++){
+      const side=Math.random()<0.5?'buy':'sell';
+      const aggressive=Math.random()<0.5; // 50% hit best quote directly
+      const px=aggressive
+        ?(side==='buy'?(ob.bestAsk()||Math.round(mid)+1):(ob.bestBid()||Math.round(mid)-1))
+        :Math.round(mid)+Math.round(randn()*NOISE_SIGMA)+(side==='buy'?-1:1);
+      const qty=rnd(1,20);
+      const tp=simMode==='FnK'&&Math.random()<0.25?'FnK':'GTC';
+      onTrades(ob.add(new JSOrder(tp,nid++,side,Math.max(px,9000),qty)),ag,side);
+    }
+    // cancel flood — mirrors real HFT, keeps book fresh
+    const cancelN=rnd(2,5);
+    if(ob.size()>10){
+      const ids=ob.map?[...ob.map.keys()]:[];
+      for(let i=0;i<cancelN&&i<ids.length;i++)
+        ob.cancel(ids[rnd(0,ids.length-1)]);
+    }
+  }
+  if(Math.random()<DRIFT_PROB){
+    mid0+=Math.round(randn()*DRIFT_SIGMA);
+    mid0=Math.max(9800,Math.min(10200,mid0));
+  }
+}
+
+// ── MAIN LOOP ─────────────────────────────────────────────
+// Sim runs every frame at full speed.
+// Render is throttled to every 6th frame (~10fps) to eliminate lag.
+let frameCount=0;
+function loop(){
+  if(!paused&&ob){
+    const n=Math.max(8,spd*8);
+    for(let i=0;i<n;i++){
+      agentTick(AGENTS[rnd(0,3)]);
+      // reseed best levels if book gets thin — ensures aggressive orders always find a match
+      if(tickNum%50===0){
+        const b=ob.bestBid(),a=ob.bestAsk();
+        const m=ob.mid();
+        if(!b||m-b>5) ob.add(new JSOrder('GTC',nid++,'buy', Math.round(m)-1,rnd(10,30)));
+        if(!a||a-m>5) ob.add(new JSOrder('GTC',nid++,'sell',Math.round(m)+1,rnd(10,30)));
+      }
+      if(ob.size()>1000){
+        const ids=ob.map?[...ob.map.keys()]:[];
+        if(ids.length)ob.cancel(ids[rnd(0,ids.length-1)]);
+      }
+      tickNum++;
+    }
+    const now=Date.now();
+    if(now-lastTpsT>=1000){
+      tpsRing[tpsRingIdx%10]=tpw;
+      tpsRingIdx++;
+      tps=Math.round(tpsRing.reduce((a,b)=>a+b,0)/Math.min(tpsRingIdx,10));
+      tpw=0;lastTpsT=now;
+    }
+    frameCount++;
+    if(frameCount%6===0)renderUI(); // render at ~10fps, sim at full 60fps
+  }
+  requestAnimationFrame(loop);
+}
+
+// ── RENDER ────────────────────────────────────────────────
+function renderUI(){
+  const inf=ob.infos();
+  const bid=ob.bestBid(),ask=ob.bestAsk();
+  const spr=bid&&ask?ask-bid:null;
+  const lp=pxHist[pxHist.length-1],pp=pxHist[pxHist.length-2];
+
+  document.getElementById('mPx').textContent =lp?fmt(lp):'—';
+  document.getElementById('mPx').className   ='met-val '+(lp&&pp?(lp>=pp?'up':'dn'):'');
+  document.getElementById('mSpr').textContent=spr!==null?spr+'¢':'—';
+  document.getElementById('mSpr').className  ='met-val '+(spr!==null?(spr<=2?'up':spr>=5?'dn':''):'');
+  document.getElementById('mTps').textContent=tps;
+  document.getElementById('mOrd').textContent=ob.size();
+  document.getElementById('mVol').textContent=totalVol>9999?(totalVol/1000).toFixed(1)+'k':totalVol;
+  document.getElementById('mTick').textContent=tickNum>9999?(tickNum/1000).toFixed(1)+'k':tickNum;
+
+  // book — 6 levels each side (down from 8)
+  const topAsks=inf.asks.slice(0,10).reverse();
+  const topBids=inf.bids.slice(0,10);
+  const maxQ=Math.max(...topBids.map(r=>r.qty),...topAsks.map(r=>r.qty),1);
+  let askHTML='',bidHTML='';
+  topAsks.forEach(r=>{
+    const w=(r.qty/maxQ*100).toFixed(0);
+    askHTML+=`<tr class="ask-row"><td><span class="ask-px">${f2(r.px)}</span><div class="bar" style="width:${w}%;background:var(--red-dim)"></div></td><td><span>${r.qty}</span></td><td><span style="color:var(--text2)">${r.n}</span></td></tr>`;
+  });
+  topBids.forEach(r=>{
+    const w=(r.qty/maxQ*100).toFixed(0);
+    bidHTML+=`<tr class="bid-row"><td><span class="bid-px">${f2(r.px)}</span><div class="bar" style="width:${w}%;background:var(--green-dim)"></div></td><td><span>${r.qty}</span></td><td><span style="color:var(--text2)">${r.n}</span></td></tr>`;
+  });
+  document.getElementById('askBody').innerHTML=askHTML;
+  document.getElementById('bidBody').innerHTML=bidHTML;
+  document.getElementById('spreadRow').textContent=spr!==null?`spread ${spr}¢  ·  bid ${f2(bid)}  ·  ask ${f2(ask)}`:'spread —';
+
+  // tape — 20 rows max
+  document.getElementById('tapeBody').innerHTML=tape.slice(0,20).map(t=>
+    `<div class="tape-row ${t.side}"><span class="tape-px">${f2(t.px)}</span><span class="tape-qty">${t.qty}</span><span class="tape-time">${t.t}</span></div>`
+  ).join('');
+
+  // agents
+  document.getElementById('agTbody').innerHTML=AGENTS.map(a=>{
+    const inv=a.buyVol-a.sellVol;
+    return`<tr><td><span class="agent-dot" style="background:${a.color}"></span>${a.name}</td><td style="color:var(--text0)">${a.trades}</td><td style="color:${inv>=0?'var(--green)':'var(--red)'}">${inv>=0?'+':''}${inv}</td></tr>`;
+  }).join('');
+
+  // log — 20 entries max
+  document.getElementById('logScroll').innerHTML=logs.slice(0,20).map(l=>
+    `<div class="log-entry"><span class="log-tag ${l.tag}">${l.tag}</span><span>${l.txt}</span><span style="font-size:9px;color:var(--text2);margin-left:4px">${l.t}</span></div>`
+  ).join('');
+  document.getElementById('logCount').textContent=logTotal.toLocaleString()+' events';
+}
+
+// ── CONTROLS ─────────────────────────────────────────────
+function setMode(m){
+  simMode=m;
+  document.getElementById('btnGTC').className='btn'+(m==='GTC'?' active':'');
+  document.getElementById('btnFnK').className='btn'+(m==='FnK'?' active':'');
+}
+function togglePause(){
+  paused=!paused;
+  document.getElementById('btnPause').textContent=paused?'Resume':'Pause';
+  document.getElementById('dot').className='status-dot'+(paused?' paused':'');
+  document.getElementById('statusTxt').textContent=paused?'PAUSED':'LIVE';
+}
+function resetAll(){
+  paused=false;nid=1;mid0=INIT_MID;totalVol=0;tpw=0;tps=0;tickNum=0;logTotal=0;frameCount=0;
+  tpsRing=[];tpsRingIdx=0;
+  pxHist=[];tape=[];logs=[];
+  AGENTS.forEach(a=>{a.trades=0;a.buyVol=0;a.sellVol=0;});
+  if(engineType==='wasm'&&ob){ob.destroy();ob=new WASMOrderbook(window._wasmModule);}
+  else ob=new JSOrderbook();
+  document.getElementById('dot').className='status-dot';
+  document.getElementById('statusTxt').textContent='LIVE';
+  document.getElementById('btnPause').textContent='Pause';
+  seed();
+}
+function seed(){
+  for(let i=0;i<BOOK_DEPTH;i++)ob.add(new JSOrder('GTC',nid++,'buy', INIT_MID-(i+1)*BOOK_STEP,rnd(10,50)));
+  for(let i=0;i<BOOK_DEPTH;i++)ob.add(new JSOrder('GTC',nid++,'sell',INIT_MID+(i+1)*BOOK_STEP,rnd(10,50)));
+}
+document.getElementById('spdSlider').addEventListener('input',function(){
+  spd=+this.value;
+  document.getElementById('spdLabel').textContent=this.value+'x';
+});
+
+// ── WASM LOADER ───────────────────────────────────────────
+function setOverlayStatus(msg,pct){
+  document.getElementById('ovStatus').textContent=msg;
+  document.getElementById('ovFill').style.width=pct+'%';
+}
+async function tryLoadWASM(){
+  setOverlayStatus('Loading orderbook.js glue script…',20);
+  return new Promise((resolve,reject)=>{
+    const s=document.createElement('script');
+    s.src='orderbook.js';
+    s.onload=async()=>{
+      setOverlayStatus('Instantiating WASM module…',50);
+      try{
+        const M=await window.OrderbookModule({locateFile:f=>f});
+        setOverlayStatus('WASM engine ready!',100);
+        window._wasmModule=M;
+        resolve(M);
+      }catch(e){reject(e);}
+    };
+    s.onerror=()=>reject(new Error('orderbook.js not found'));
+    document.head.appendChild(s);
+  });
+}
+let simRunning=false;
+function startFallback(){
+  document.getElementById('btnFallback').style.display='none';
+  document.getElementById('btnJS').style.display='none';
+  engineType='js';
+  ob=new JSOrderbook();
+  document.getElementById('engineBadge').textContent='engine: JS fallback';
+  document.getElementById('engineBadge').style.color='var(--amber)';
+  document.getElementById('engTag').textContent='JS ENGINE';
+  document.getElementById('overlay').classList.add('hidden');
+  document.getElementById('dot').className='status-dot';
+  document.getElementById('statusTxt').textContent='LIVE';
+  if(!simRunning) finishInit(); else { seed(); }
+}
+function finishInit(){
+  seed();
+  simRunning=true;
+  document.getElementById('overlay').classList.add('hidden');
+  document.getElementById('dot').className='status-dot';
+  document.getElementById('statusTxt').textContent='LIVE';
+  requestAnimationFrame(loop);
+}
+
+// ── BOOT ─────────────────────────────────────────────────
+(async()=>{
+  const t=setTimeout(()=>{
+    document.getElementById('btnFallback').style.display='block';
+    setOverlayStatus('orderbook.js not found — use JS fallback or add WASM files',0);
+  },8000);
+  try{
+    const M=await tryLoadWASM();
+    clearTimeout(t);
+    engineType='wasm';
+    ob=new WASMOrderbook(M);
+    document.getElementById('engineBadge').textContent='engine: C++ WASM ✓';
+    document.getElementById('engineBadge').style.color='var(--green)';
+    document.getElementById('engTag').textContent='WASM ENGINE';
+    finishInit();
+  }catch(e){
+    clearTimeout(t);
+    console.warn('WASM load failed:',e);
+    document.getElementById('btnFallback').style.display='block';
+    setOverlayStatus('WASM load failed — click below to run JS fallback',0);
+  }
+})();
+</script>
+</body>
+</html>
