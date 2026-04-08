@@ -3,8 +3,9 @@
 
 #include <cmath>
 #include "YieldCurve.h"
+#include "Bond.h"
 
-class ZeroCouponBond {
+class ZeroCouponBond : public Bond{
 private:
     double facevalue;
     double maturity;

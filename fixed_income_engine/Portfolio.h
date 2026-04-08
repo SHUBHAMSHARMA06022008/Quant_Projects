@@ -3,16 +3,16 @@
 
 #include <vector>
 #include <cmath>
-#include "ZeroCouponBond.h"
+#include "Bond.h"
 #include "Liability.h"
 #include "YieldCurve.h"
 
 class Portfolio {
 private:
-    std::vector<ZeroCouponBond> assets;
+    std::vector<Bond*> assets;
     std::vector<Liability> liabilities;
 public:
-    Portfolio(std::vector<ZeroCouponBond> assets, std::vector<Liability> liabilities)
+    Portfolio(std::vector<Bond*> assets, std::vector<Liability> liabilities)
         : assets(assets), liabilities(liabilities) {}
 
     bool checkRedington(const YieldCurve& curve) {
@@ -20,11 +20,11 @@ public:
         double asset_duration = 0, liability_duration = 0;
         double asset_convexity = 0, liability_convexity = 0;
 
-        for (auto& a : assets) total_asset_pv += a.price(curve);
+        for (auto& a : assets) total_asset_pv += a->price(curve);
         for (auto& a : assets) {
-            double w = a.price(curve) / total_asset_pv;
-            asset_duration += w * a.modified_duration(curve);
-            asset_convexity += w * a.convexity(curve);
+            double w = a->price(curve) / total_asset_pv;
+            asset_duration += w * a->modified_duration(curve);
+            asset_convexity += w * a->convexity(curve);
         }
         for (auto& l : liabilities) total_liability_pv += l.pv(curve);
         for (auto& l : liabilities) {

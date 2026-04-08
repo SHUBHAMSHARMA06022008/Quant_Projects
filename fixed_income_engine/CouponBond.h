@@ -2,9 +2,10 @@
 #define COUPONBOND_H
 
 #include <cmath>
+#include "Bond.h"
 #include "YieldCurve.h"
 
-class CouponBond {
+class CouponBond : public Bond {
 private:
     double facevalue, couponrate, maturity, frequency;
 
@@ -22,7 +23,7 @@ public:
     CouponBond(double frequency, double maturity, double couponrate, double facevalue)
         : frequency(frequency), maturity(maturity), couponrate(couponrate), facevalue(facevalue) {}
 
-    double price(const YieldCurve& curve) {
+    double price(const YieldCurve& curve) override {
         double coupon = facevalue * couponrate / frequency;
         double pv = 0;
         for (int i = 1; i <= maturity * frequency; i++) {
@@ -52,16 +53,20 @@ public:
         return weighted_sum / price(curve);
     }
 
+    double modified_duration(const YieldCurve& curve) override {
+        return macaulay(curve);
+    }
+
+    double convexity(const YieldCurve& curve, double dy = 0.0001) override {
+        double r = IRR(price(curve));
+        double p0 = price_from_rate(r);
+        return (price_from_rate(r + dy) + price_from_rate(r - dy) - 2 * p0) / (p0 * dy * dy);
+    }
+
     double effective_duration(double marketPrice, double dy = 0.0001) {
         double r = IRR(marketPrice);
         double p0 = price_from_rate(r);
         return (price_from_rate(r - dy) - price_from_rate(r + dy)) / (2 * p0 * dy);
-    }
-
-    double convexity(double marketPrice, double dy = 0.0001) {
-        double r = IRR(marketPrice);
-        double p0 = price_from_rate(r);
-        return (price_from_rate(r + dy) + price_from_rate(r - dy) - 2 * p0) / (p0 * dy * dy);
     }
 
     double dv01(double marketPrice) {
