@@ -54,7 +54,8 @@ public:
     }
 
     double modified_duration(const YieldCurve& curve) override {
-        return macaulay(curve);
+        double y = IRR(price(curve));   // yield to maturity
+        return macaulay(curve) / (1 + y / frequency);
     }
 
     double convexity(const YieldCurve& curve, double dy = 0.0001) override {
